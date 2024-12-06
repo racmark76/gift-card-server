@@ -61,3 +61,21 @@ exports.handler = async (event) => {
     };
   }
 };
+exports.handler = async (event) => {
+  console.log('Request body:', event.body);
+  try {
+    const { giftCode, amountToCharge } = JSON.parse(event.body);
+    console.log('Gift code:', giftCode);
+    console.log('Amount:', amountToCharge);
+    // rest of code...
+  } catch (error) {
+    console.error('Error details:', error.message);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ 
+        error: 'Server error',
+        details: error.message 
+      })
+    };
+  }
+};
