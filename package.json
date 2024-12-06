@@ -1,0 +1,10 @@
+{
+  "name": "gift-card-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^4.17.1",
+    "airtable": "^0.11.1",
+    "dotenv": "^10.0.0"
+  }
+}
