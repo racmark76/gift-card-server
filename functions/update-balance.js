@@ -1,6 +1,8 @@
 const Airtable = require('airtable');
 
 exports.handler = async (event) => {
+  console.log('Request body:', event.body);
+  
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
@@ -9,7 +11,10 @@ exports.handler = async (event) => {
     const base = new Airtable({apiKey: process.env.AIRTABLE_API_KEY})
       .base(process.env.AIRTABLE_BASE_ID);
     
+    console.log('Attempting to parse:', event.body);
     const { giftCode, amountToCharge } = JSON.parse(event.body);
+    console.log('Gift code:', giftCode);
+    console.log('Amount:', amountToCharge);
     
     const records = await base('Gift Cards')
       .select({
@@ -55,21 +60,7 @@ exports.handler = async (event) => {
     };
 
   } catch (error) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Server error' })
-    };
-  }
-};
-exports.handler = async (event) => {
-  console.log('Request body:', event.body);
-  try {
-    const { giftCode, amountToCharge } = JSON.parse(event.body);
-    console.log('Gift code:', giftCode);
-    console.log('Amount:', amountToCharge);
-    // rest of code...
-  } catch (error) {
-    console.error('Error details:', error.message);
+    console.error('Error details:', error.message, error.stack);
     return {
       statusCode: 500,
       body: JSON.stringify({ 
