@@ -43,14 +43,24 @@ exports.handler = async (event) => {
       };
     }
 
-    const newBalance = currentBalance - amountToCharge;
+//     const newBalance = currentBalance - amountToCharge;
 
-   const currentDate = new Date().toLocaleDateString('en-US');
+//    const currentDate = new Date().toLocaleDateString('en-US');
+// await base('Gift Cards').update(record.id, {
+//       'Current Balance': newBalance,
+//       'Status': newBalance <= 0 ? 'Depleted' : 'Active',
+//       'Last Used Date': currentDate
+// });
+
+// Instead of toLocaleDateString
+const currentDate = new Date().toISOString();
+
 await base('Gift Cards').update(record.id, {
       'Current Balance': newBalance,
       'Status': newBalance <= 0 ? 'Depleted' : 'Active',
-      'Last Used Date': currentDate
+      'Last Used Date': currentDate  // This will include time: YYYY-MM-DDTHH:mm:ss.sssZ
 });
+    
 
     return {
       statusCode: 200,
