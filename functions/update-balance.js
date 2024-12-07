@@ -45,12 +45,12 @@ exports.handler = async (event) => {
 
     const newBalance = currentBalance - amountToCharge;
 
-    await base('Gift Cards').update(record.id, {
+   const currentDate = new Date().toLocaleDateString('en-US');
+await base('Gift Cards').update(record.id, {
       'Current Balance': newBalance,
-      'Status': newBalance <= 0 ? 'Depleted' : 'Active'
-      'Last Used Date': new Date().toLocaleDateString('en-US')
-  
-    });
+      'Status': newBalance <= 0 ? 'Depleted' : 'Active',
+      'Last Used Date': currentDate
+});
 
     return {
       statusCode: 200,
