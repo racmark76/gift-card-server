@@ -48,7 +48,7 @@
 //     await base('Gift Cards').update(record.id, {
 //       'Current Balance': newBalance,
 //       'Status': newBalance <= 0 ? 'Depleted' : 'Active'
-//       'Last Used Date': new Date().toISOString()
+//   
 //     });
 
 //     return {
@@ -122,7 +122,7 @@ exports.handler = async (event) => {
     await base('Gift Cards').update(record.id, {
       'Current Balance': newBalance,
       'Status': newBalance <= 0 ? 'Depleted' : 'Active',
-      'Last Used Date': new Date().toISOString()
+     
     });
 
     return {
