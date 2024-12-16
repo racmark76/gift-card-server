@@ -3,7 +3,7 @@ const Airtable = require('airtable');
 exports.handler = async (event) => {
   // Add CORS headers
   const headers = {
-    'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
+    'Access-Control-Allow-Origin': 'https://sorianobrotherscubancuisine.com',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
