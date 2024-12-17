@@ -49,22 +49,22 @@ exports.handler = async (event) => {
 
    const record = records[0];
    const currentBalance = parseFloat(record.get('Current Balance'));
-   
-   // Calculate amounts
-   let amountToDeduct = currentBalance;
-   let remainingToPay = 0;
 
-   if (currentBalance < amount) {
-     // Use whatever balance is available
-     amountToDeduct = currentBalance;
-     remainingToPay = amount - currentBalance;
+   // Calculate amounts correctly
+   let amountToDeduct = 0;
+   let remainingToPay = amount;
+
+   if (currentBalance >= amount) {
+       // Can cover full amount
+       amountToDeduct = amount;
+       remainingToPay = 0;
    } else {
-     // Enough balance to cover full amount
-     amountToDeduct = amount;
-     remainingToPay = 0;
+       // Can only cover partial amount
+       amountToDeduct = currentBalance;  // Only use what's available
+       remainingToPay = parseFloat((amount - currentBalance).toFixed(2));  // Customer pays the difference
    }
 
-   const newBalance = currentBalance - amountToDeduct;
+   const newBalance = parseFloat((currentBalance - amountToDeduct).toFixed(2));
    const currentDate = new Date().toISOString();
 
    await base('Gift Cards').update(record.id, {
