@@ -1,13 +1,11 @@
 const Airtable = require('airtable');
 exports.handler = async (event) => {
- // Add CORS headers
  const headers = {
    'Access-Control-Allow-Origin': 'https://sorianobrotherscubancuisine.com', 
    'Access-Control-Allow-Headers': 'Content-Type',
    'Access-Control-Allow-Methods': 'POST, OPTIONS'
  };
 
- // Handle preflight requests
  if (event.httpMethod === 'OPTIONS') {
    return {
      statusCode: 200,
@@ -28,10 +26,10 @@ exports.handler = async (event) => {
    const base = new Airtable({apiKey: process.env.AIRTABLE_API_KEY})
      .base(process.env.AIRTABLE_BASE_ID);
    
-   console.log('Attempting to parse:', event.body);
-   const { giftCardCode, amount } = JSON.parse(event.body);
+   const { giftCardCode, amount, checkBalance } = JSON.parse(event.body);
    console.log('Gift code:', giftCardCode);
    console.log('Amount:', amount);
+   console.log('Check Balance Only:', checkBalance);
    
    const records = await base('Gift Cards')
      .select({
@@ -50,18 +48,29 @@ exports.handler = async (event) => {
    const record = records[0];
    const currentBalance = parseFloat(record.get('Current Balance'));
 
-   // Calculate amounts correctly
+   // If only checking balance, return current balance without updating
+   if (checkBalance) {
+     return {
+       statusCode: 200,
+       headers,
+       body: JSON.stringify({ 
+         success: true,
+         currentBalance,
+         status: currentBalance <= 0 ? 'Depleted' : 'Active'
+       })
+     };
+   }
+
+   // Otherwise, proceed with deduction
    let amountToDeduct = 0;
    let remainingToPay = amount;
 
    if (currentBalance >= amount) {
-       // Can cover full amount
        amountToDeduct = amount;
        remainingToPay = 0;
    } else {
-       // Can only cover partial amount
-       amountToDeduct = currentBalance;  // Only use what's available
-       remainingToPay = parseFloat((amount - currentBalance).toFixed(2));  // Customer pays the difference
+       amountToDeduct = currentBalance;
+       remainingToPay = parseFloat((amount - currentBalance).toFixed(2));
    }
 
    const newBalance = parseFloat((currentBalance - amountToDeduct).toFixed(2));
