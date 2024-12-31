@@ -4,7 +4,7 @@ const Airtable = require('airtable');
 exports.handler = async (event, context) => {
   try {
     // Configure Airtable
-    const base = new Airtable({apiKey: 'YOUR_API_KEY'}).base('YOUR_BASE_ID');
+    const base = new Airtable({apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'}).base('appYJ9gWRBFOLfb0r');
     
     const data = JSON.parse(event.body);
     const { orderDetails } = data;
