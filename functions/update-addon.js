@@ -1,47 +1,66 @@
 // update-addon.js
 const Airtable = require('airtable');
+require('dotenv').config();
 
 exports.handler = async (event, context) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method Not Allowed' };
+  }
+
+  const base = new Airtable({
+    apiKey: process.env.AIRTABLE_API_KEY
+  }).base(process.env.AIRTABLE_BASE_ID);
+
   try {
-    // Configure Airtable
-    const base = new Airtable({apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'}).base('appYJ9gWRBFOLfb0r');
+    // Log incoming data for debugging
+    console.log('Received data:', event.body);
     
     const data = JSON.parse(event.body);
-    const { orderDetails } = data;
-    
-    // Process orders and update Airtable
-    const processedOrders = await Promise.all(orderDetails.orders.map(async order => {
-      const dayAddons = orderDetails.addOns[order.day.charAt(0).toUpperCase() + order.day.slice(1)] || [];
-      
-      // Create Airtable record
-      await base('Orders').create({
-        "Customer Name": data.customerInfo.name,
-        "Day": order.day,
-        "Main Dish": order.name,
-        "Extras": dayAddons.length > 0 ? 
-          dayAddons.map(addon => `${addon.name} - ${addon.quantity} - $${addon.price}`).join(', ') 
-          : '',
-        "Status": "Pending Pick Up"
-      });
+    const { customerInfo, orderDetails } = data;
 
-      return {
-        ...order,
-        extras: dayAddons
-      };
-    }));
+    // Update Airtable records
+    for (const order of orderDetails.orders) {
+      const dayKey = order.day.charAt(0).toUpperCase() + order.day.slice(1);
+      const dayAddons = orderDetails.addOns[dayKey] || [];
+      
+      // Format extras string only if there are addons for this day
+      const extrasString = dayAddons.length > 0 
+        ? dayAddons.map(addon => `${addon.name} ${addon.quantity} $${addon.price}`).join(', ')
+        : '';
+
+      // Find matching record in Airtable
+      const records = await base('Orders').select({
+        filterByFormula: `AND(
+          {Customer Name} = '${customerInfo.name}',
+          {Day} = '${order.day}',
+          {Status} = 'Pending Pick Up'
+        )`
+      }).firstPage();
+
+      // Update record if found
+      if (records.length > 0) {
+        await base('Orders').update(records[0].id, {
+          "Extras": extrasString
+        });
+      }
+    }
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
-        message: "Orders processed and Airtable updated"
+        message: "Extras updated successfully"
       })
     };
 
   } catch (error) {
+    console.error('Error processing request:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ 
+        error: error.message,
+        message: "Failed to update extras" 
+      })
     };
   }
 };
