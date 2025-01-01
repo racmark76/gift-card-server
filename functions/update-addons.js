@@ -4,6 +4,12 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+function formatDate(dateStr) {
+  // Convert "01/20/2025" to "1/20/2025"
+  const [month, day, year] = dateStr.split('/');
+  return `${parseInt(month)}/${parseInt(day)}/${year}`;
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -20,17 +26,10 @@ exports.handler = async (event, context) => {
     console.log('Processing order for:', data.customerInfo.name);
     console.log('Add-ons received:', JSON.stringify(data.orderDetails.addOns, null, 2));
 
-    // Get all orders for the specific dates in the order
-    const dates = data.orderDetails.orders.map(order => order.week);
-    const orderDays = data.orderDetails.orders.map(order => order.day);
-    
-    console.log('Looking for days:', orderDays);
-    console.log('Looking for dates:', dates);
-
-    // Build OR filter for each day/date combination
+    // Build filter with formatted dates
     const filters = data.orderDetails.orders.map(order => 
       `AND({Customer Name} = '${data.customerInfo.name}', 
-           {Week} = '${order.week}', 
+           {Week} = '${formatDate(order.week)}', 
            {Day} = '${order.day}')`
     );
 
@@ -71,12 +70,13 @@ exports.handler = async (event, context) => {
             }
           }]);
           console.log(`Successfully updated ${day}`);
+          
+          // Wait between updates
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
         } catch (error) {
           console.error(`Error updating ${day}:`, error);
         }
-
-        // Wait between updates
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
