@@ -13,54 +13,62 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    console.log('Received body:', event.body);
-    const data = JSON.parse(event.body);
-    const { customerInfo, currentDay, week, addOns } = data;
+    console.log('Received event body:', event.body);
     
-    console.log('Processing update for:', {
-      customer: customerInfo.name,
-      day: currentDay,
-      week: week,
-      addOns: addOns
-    });
+    // Parse the webhook data
+    const webhookData = JSON.parse(event.body);
+    console.log('Parsed webhook data:', webhookData);
 
-    // Find the specific record for this customer and day
-    const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `AND(
-        {Customer Name} = '${customerInfo.name}',
-        {Week} = '${week}',
-        {Day} = '${currentDay.toLowerCase()}'
-      )`
-    }).firstPage();
-
-    if (records.length > 0) {
-      // Format add-ons string
-      const extrasString = addOns 
-        ? addOns.map(addon => `${addon.name} (${addon.quantity})`).join(', ')
-        : '';
-
-      // Update the record
-      await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
-        'Extras': extrasString
-      });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          message: 'Add-on updated successfully',
-          day: currentDay,
-          extras: extrasString
-        })
-      };
+    // Validate data structure
+    if (!Array.isArray(webhookData) || !webhookData[0]?.customerInfo?.name) {
+      throw new Error('Invalid data structure');
     }
 
+    const { customerInfo, orderDetails } = webhookData[0];
+    console.log('Processing order for customer:', customerInfo.name);
+
+    // Process each day's order and its add-ons
+    const updatePromises = orderDetails.orders.map(async (order) => {
+      // Get add-ons for this specific day
+      const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
+      const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
+      
+      // Format add-ons string
+      const extrasString = dayAddOns.map(addon => 
+        `${addon.name} (${addon.quantity})`
+      ).join(', ');
+
+      console.log(`Looking for record: ${customerInfo.name}, ${order.week}, ${order.day}`);
+
+      // Find and update the record in Airtable
+      const records = await base('tblM6K7Ii11HBkrW9').select({
+        filterByFormula: `AND(
+          {Customer Name} = '${customerInfo.name}',
+          {Week} = '${order.week}',
+          {Day} = '${order.day}'
+        )`
+      }).firstPage();
+
+      if (records.length > 0) {
+        console.log(`Updating record for ${order.day} with extras:`, extrasString);
+        return await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+          'Extras': extrasString
+        });
+      } else {
+        console.log(`No record found for ${order.day}`);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(updatePromises);
+    const successfulUpdates = results.filter(r => r !== null).length;
+
     return {
-      statusCode: 404,
+      statusCode: 200,
       headers,
       body: JSON.stringify({
-        message: 'Record not found',
-        day: currentDay
+        message: 'Add-ons updated successfully',
+        updates: successfulUpdates
       })
     };
 
@@ -69,9 +77,10 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ 
-        message: 'Internal server error', 
-        error: error.message 
+      body: JSON.stringify({
+        message: 'Internal server error',
+        error: error.message,
+        body: event.body
       })
     };
   }
