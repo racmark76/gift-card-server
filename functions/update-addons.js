@@ -4,6 +4,29 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+async function updateRecord(record, addOns) {
+  const day = record.get('Day'); // lowercase from airtable
+  const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+  const dayAddOns = addOns[capitalizedDay] || [];
+
+  if (dayAddOns.length > 0) {
+    const extrasString = dayAddOns.map(addon => 
+      `${addon.name} (${addon.quantity})`
+    ).join(', ');
+
+    try {
+      await base('tblM6K7Ii11HBkrW9').update(record.id, {
+        'Extras': extrasString
+      });
+      return { day, success: true, extras: extrasString };
+    } catch (error) {
+      console.error(`Failed to update ${day}:`, error);
+      return { day, success: false, error: error.message };
+    }
+  }
+  return { day, success: true, extras: null };
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -16,66 +39,18 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // Log the incoming data
-    console.log('Raw event body:', event.body);
-    
     const data = JSON.parse(event.body)[0];
-    console.log('Parsed data:', JSON.stringify(data, null, 2));
     
-    // Log customer info
-    console.log('Customer:', data.customerInfo.name);
-    console.log('Add-ons received:', data.orderDetails.addOns);
-
-    // Get all records first
+    // Get all records for this customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
       filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
     }).all();
 
-    console.log('Records found:', records.length);
-    console.log('Record days:', records.map(r => r.get('Day')));
-
-    let processedUpdates = [];
-
-    // Process each record one at a time
+    // Update each record one at a time
+    const updates = [];
     for (const record of records) {
-      const day = record.get('Day');
-      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
-      
-      console.log(`\nProcessing day: ${day}`);
-      console.log(`Looking for add-ons with key: ${capitalizedDay}`);
-      console.log('Available add-on keys:', Object.keys(data.orderDetails.addOns));
-
-      const dayAddOns = data.orderDetails.addOns[capitalizedDay];
-      console.log('Found add-ons:', dayAddOns);
-
-      if (dayAddOns && dayAddOns.length > 0) {
-        const extrasString = dayAddOns.map(addon => 
-          `${addon.name} (${addon.quantity})`
-        ).join(', ');
-
-        console.log(`Updating record ${record.id} for ${day} with: ${extrasString}`);
-
-        try {
-          const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
-            'Extras': extrasString
-          });
-          console.log(`Update successful for ${day}`);
-          processedUpdates.push({
-            day,
-            success: true,
-            extras: extrasString
-          });
-        } catch (updateError) {
-          console.error(`Error updating ${day}:`, updateError);
-          processedUpdates.push({
-            day,
-            success: false,
-            error: updateError.message
-          });
-        }
-      } else {
-        console.log(`No add-ons found for ${day}`);
-      }
+      const result = await updateRecord(record, data.orderDetails.addOns);
+      updates.push(result);
     }
 
     return {
@@ -83,21 +58,20 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
-        totalRecords: records.length,
-        updates: processedUpdates,
-        addOnDays: Object.keys(data.orderDetails.addOns)
+        customerName: data.customerInfo.name,
+        updates: updates,
+        recordCount: records.length
       })
     };
 
   } catch (error) {
-    console.error('Main error:', error);
+    console.error('Error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message,
-        stack: error.stack
+        error: error.message
       })
     };
   }
