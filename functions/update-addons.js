@@ -5,63 +5,54 @@ const base = new Airtable({
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
-  };
-
   try {
-    // Find Berny's Monday order
+    // First get all records
+    console.log('Getting records...');
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `AND(
-        {Customer Name} = 'Berny',
-        {Week} = '1/6/2025',
-        {Day} = 'monday'
-      )`
+      maxRecords: 1
     }).firstPage();
 
-    console.log('Found records:', records.length);
-
     if (records.length > 0) {
-      // Try to update the Extras field
-      const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
-        'Extras': 'Test Add-On'
-      });
+      console.log('Found record, attempting update...');
+      const record = records[0];
+      
+      // Try to update the first record we find
+      const updated = await base('tblM6K7Ii11HBkrW9').update([
+        {
+          "id": record.id,
+          "fields": {
+            "Extras": "TEST"
+          }
+        }
+      ]);
 
       return {
         statusCode: 200,
-        headers,
         body: JSON.stringify({
-          message: 'Update attempted',
-          recordId: records[0].id,
-          foundRecords: records.length,
-          updatedRecord: {
-            customerName: updated.fields['Customer Name'],
-            week: updated.fields['Week'],
-            day: updated.fields['Day'],
-            extras: updated.fields['Extras']
-          }
+          success: true,
+          recordId: record.id,
+          before: record.fields,
+          after: updated[0].fields
         })
       };
     }
 
     return {
       statusCode: 404,
-      headers,
       body: JSON.stringify({
-        message: 'Record not found'
+        success: false,
+        message: 'No records found'
       })
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Update error:', error);
     return {
       statusCode: 500,
-      headers,
       body: JSON.stringify({
-        message: 'Internal server error',
-        error: error.message
+        success: false,
+        error: error.message,
+        stack: error.stack
       })
     };
   }
