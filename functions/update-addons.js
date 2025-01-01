@@ -6,8 +6,6 @@ const base = new Airtable({
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
-  console.log('1. Function started');
-  
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -15,52 +13,57 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    console.log('2. Raw event body:', event.body);
-    
-    // Parse the webhook data
     const webhookData = JSON.parse(event.body)[0];
-    console.log('3. Parsed webhook data:', JSON.stringify(webhookData, null, 2));
-    
     const { customerInfo, orderDetails } = webhookData;
-    console.log('4. Customer info:', customerInfo);
-    console.log('5. Order details:', orderDetails);
 
-    // First, let's just try to get ANY records from the table
-    console.log('6. Attempting to read from Airtable');
-    const testRecords = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 1
-    }).firstPage();
-    console.log('7. Test record fields:', testRecords[0]?.fields);
-
-    // Now try our actual query
-    console.log('8. Searching for customer:', customerInfo.name);
+    // Get all records for this customer
     const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
       filterByFormula: `{Customer Name} = '${customerInfo.name}'`
     }).firstPage();
-    console.log('9. Found customer records:', customerRecords.length);
 
-    if (customerRecords.length > 0) {
-      console.log('10. Customer record fields:', customerRecords[0].fields);
-    }
+    console.log('Found records:', customerRecords.length);
 
+    // Process updates
+    const updatePromises = customerRecords.map(async (record) => {
+      const recordDay = record.fields['Day'];  // Get the day from the record
+      const dayCapitalized = recordDay.charAt(0).toUpperCase() + recordDay.slice(1);
+      
+      // Get add-ons for this day
+      const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
+      
+      // Format add-ons string
+      const extrasString = dayAddOns.map(addon => 
+        `${addon.name} (${addon.quantity})`
+      ).join(', ');
+
+      console.log(`Updating ${recordDay} with extras:`, extrasString);
+
+      // Update the record
+      return await base('tblM6K7Ii11HBkrW9').update(record.id, {
+        'Extras': extrasString
+      });
+    });
+
+    // Wait for all updates
+    const results = await Promise.all(updatePromises);
+    
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({ 
-        message: 'Debug run completed',
-        foundRecords: customerRecords.length
+        message: 'Add-ons updated successfully',
+        updates: results.length
       })
     };
 
   } catch (error) {
-    console.error('Error occurred:', error);
+    console.error('Error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         message: 'Internal server error', 
-        error: error.message,
-        stack: error.stack 
+        error: error.message 
       })
     };
   }
