@@ -4,47 +4,6 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-async function processUpdates(records, addOns) {
-  // Prepare all updates first
-  const updates = records.map(record => {
-    const day = record.get('Day');
-    const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
-    const dayAddOns = addOns[capitalizedDay] || [];
-
-    if (dayAddOns.length > 0) {
-      const extrasString = dayAddOns.map(addon => 
-        `${addon.name} (${addon.quantity})`
-      ).join(', ');
-
-      return {
-        id: record.id,
-        fields: { 'Extras': extrasString }
-      };
-    }
-    return null;
-  }).filter(update => update !== null);
-
-  // Process in smaller batches
-  const batchSize = 2;
-  const results = [];
-  
-  for (let i = 0; i < updates.length; i += batchSize) {
-    const batch = updates.slice(i, i + batchSize);
-    try {
-      const response = await base('tblM6K7Ii11HBkrW9').update(batch);
-      results.push(...response);
-      await delay(1000); // Wait between batches
-    } catch (error) {
-      console.error('Batch update error:', error);
-      throw error;
-    }
-  }
-
-  return results;
-}
-
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -58,26 +17,66 @@ exports.handler = async (event, context) => {
 
   try {
     const data = JSON.parse(event.body)[0];
-    console.log('Processing order for:', data.customerInfo.name);
+    console.log(`Starting process for customer: ${data.customerInfo.name}`);
+    console.log('Received add-ons:', JSON.stringify(data.orderDetails.addOns, null, 2));
 
-    // Get all records for this customer
+    // Get records with explicit fields
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
+      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`,
+      fields: ['Customer Name', 'Day', 'Week', 'Extras']
     }).all();
 
-    console.log('Found records:', records.length);
+    console.log(`Found ${records.length} records:`, 
+      records.map(r => ({
+        day: r.get('Day'),
+        week: r.get('Week')
+      }))
+    );
 
-    // Process updates
-    const results = await processUpdates(records, data.orderDetails.addOns);
+    for (const record of records) {
+      const day = record.get('Day');
+      console.log(`\nProcessing ${day} for ${data.customerInfo.name}`);
+      
+      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      const dayAddOns = data.orderDetails.addOns[capitalizedDay] || [];
+      
+      console.log(`Add-ons found for ${capitalizedDay}:`, dayAddOns);
+
+      if (dayAddOns.length > 0) {
+        const extrasString = dayAddOns.map(addon => 
+          `${addon.name} (${addon.quantity})`
+        ).join(', ');
+
+        console.log(`Updating ${day} with: ${extrasString}`);
+        
+        try {
+          const updated = await base('tblM6K7Ii11HBkrW9').update([{
+            id: record.id,
+            fields: {
+              'Extras': extrasString
+            }
+          }]);
+          
+          console.log(`Successfully updated ${day}`);
+        } catch (updateError) {
+          console.error(`Failed to update ${day}:`, updateError);
+        }
+
+        // Wait before next update
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+        console.log(`No add-ons to process for ${day}`);
+      }
+    }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
+        recordsFound: records.length,
         customerName: data.customerInfo.name,
-        updatedCount: results.length,
-        availableDays: Object.keys(data.orderDetails.addOns)
+        processedDays: records.map(r => r.get('Day'))
       })
     };
 
