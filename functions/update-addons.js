@@ -4,6 +4,12 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+// Function to remove leading zeros from date parts
+function formatDate(dateStr) {
+  const [month, day, year] = dateStr.split('/');
+  return `${parseInt(month)}/${parseInt(day)}/${year}`;
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -12,59 +18,67 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    // First, let's get ALL records to see what's in Airtable
-    console.log('Getting all records...');
-    const allRecords = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 10
-    }).firstPage();
-
-    console.log('First few records in Airtable:');
-    allRecords.forEach(record => {
-      console.log({
-        customerName: record.fields['Customer Name'],
-        week: record.fields['Week'],
-        day: record.fields['Day']
-      });
-    });
-
-    // Now process our update
     const webhookData = JSON.parse(event.body);
     const { customerInfo, orderDetails } = webhookData[0];
+    
+    const updatePromises = orderDetails.orders.map(async (order) => {
+      // Convert "01/06/2025" to "1/6/2025"
+      const formattedDate = formatDate(order.week);
+      
+      console.log('Searching for:', {
+        customerName: customerInfo.name,
+        week: formattedDate,
+        day: order.day
+      });
 
-    // For debugging, log what we're looking for
-    console.log('Looking for:', {
-      customerName: customerInfo.name,
-      order: orderDetails.orders[0]
+      // First try to find the record
+      const records = await base('tblM6K7Ii11HBkrW9').select({
+        filterByFormula: `AND(
+          {Customer Name} = '${customerInfo.name}',
+          {Week} = '${formattedDate}',
+          {Day} = '${order.day}'
+        )`
+      }).firstPage();
+
+      console.log(`Found ${records.length} records for ${order.day}`);
+
+      if (records.length > 0) {
+        // Get add-ons for this specific day
+        const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
+        const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
+        
+        // Format add-ons string
+        const extrasString = dayAddOns.map(addon => 
+          `${addon.name} (${addon.quantity})`
+        ).join(', ');
+
+        console.log(`Updating ${order.day} with extras:`, extrasString);
+
+        // Update the record
+        const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+          'Extras': extrasString
+        });
+
+        return updated;
+      }
+
+      return null;
     });
 
-    // Try just finding by customer name first
-    const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerInfo.name}'`
-    }).firstPage();
-
-    console.log('Records found by customer name:', customerRecords.length);
-    
-    if (customerRecords.length > 0) {
-      console.log('Sample customer record:', {
-        customerName: customerRecords[0].fields['Customer Name'],
-        week: customerRecords[0].fields['Week'],
-        day: customerRecords[0].fields['Day']
-      });
-    }
+    const results = await Promise.all(updatePromises);
+    const successfulUpdates = results.filter(r => r !== null).length;
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        message: 'Debug information',
-        totalRecords: allRecords.length,
-        customerRecords: customerRecords.length,
-        sampleData: allRecords[0]?.fields,
-        lookingFor: {
+        message: 'Add-ons updated successfully',
+        updates: successfulUpdates,
+        searchCriteria: orderDetails.orders.map(order => ({
           customerName: customerInfo.name,
-          week: orderDetails.orders[0].week,
-          day: orderDetails.orders[0].day
-        }
+          week: formatDate(order.week),
+          day: order.day
+        }))
       })
     };
 
