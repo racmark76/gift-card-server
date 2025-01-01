@@ -1,15 +1,8 @@
 const Airtable = require('airtable');
-Airtable.configure({
-  apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3',
-  endpointUrl: 'https://api.airtable.com'
-});
 
-const base = Airtable.base('appYJ9gWRBFOLfb0r');
-
-function formatDate(dateStr) {
-  const [month, day, year] = dateStr.split('/');
-  return `${parseInt(month)}/${parseInt(day)}/${year}`;
-}
+const base = new Airtable({
+  apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
+}).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -23,58 +16,55 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const webhookData = JSON.parse(event.body);
-    const { customerInfo, orderDetails } = webhookData[0];
-    
-    const updatePromises = orderDetails.orders.map(async (order) => {
-      const formattedDate = formatDate(order.week);
+    const data = JSON.parse(event.body)[0];
+    const matches = [];
 
-      const records = await base('tblM6K7Ii11HBkrW9').select({
-        filterByFormula: `AND(
-          {Customer Name} = '${customerInfo.name}',
-          {Week} = '${formattedDate}',
-          {Day} = '${order.day}'
-        )`
-      }).firstPage();
+    // Get all records for this customer
+    const records = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
+    }).all();
 
-      if (records.length > 0) {
-        const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
-        const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
-        const extrasString = dayAddOns.map(addon => 
-          `${addon.name} (${addon.quantity})`
-        ).join(', ');
-
-        return await base('tblM6K7Ii11HBkrW9').update([{
-          id: records[0].id,
-          fields: {
-            'Extras': extrasString
-          }
-        }]);
+    // Match records with add-ons
+    records.forEach(record => {
+      const recordDay = record.get('Day');
+      const dayCapitalized = recordDay.charAt(0).toUpperCase() + recordDay.slice(1);
+      
+      if (data.orderDetails.addOns[dayCapitalized]) {
+        matches.push({
+          recordId: record.id,
+          addOns: data.orderDetails.addOns[dayCapitalized]
+        });
       }
-      return null;
     });
 
-    const results = await Promise.all(updatePromises);
-    const successfulUpdates = results.filter(r => r !== null).length;
+    // Update matched records
+    const updates = await Promise.all(matches.map(match => {
+      const extrasString = match.addOns
+        .map(addon => `${addon.name} (${addon.quantity})`)
+        .join(', ');
+        
+      return base('tblM6K7Ii11HBkrW9').update(match.recordId, {
+        'Extras': extrasString
+      });
+    }));
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        message: 'Add-ons updated successfully',
-        updates: successfulUpdates
+        success: true,
+        updates: updates.length
       })
     };
 
   } catch (error) {
-    console.error('Error details:', error);
+    console.error('Error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
-        message: 'Internal server error',
-        error: error.message,
-        details: JSON.stringify(error)
+        success: false,
+        error: error.message
       })
     };
   }
