@@ -6,22 +6,21 @@ const base = new Airtable({
 
 exports.handler = async (event, context) => {
   try {
-    // First get all records
-    console.log('Getting records...');
+    // Find Berny's specific order
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 1
+      filterByFormula: `AND(
+        {Customer Name} = 'Berny',
+        {Week} = '1/6/2025',
+        {Day} = 'monday'
+      )`
     }).firstPage();
 
     if (records.length > 0) {
-      console.log('Found record, attempting update...');
-      const record = records[0];
-      
-      // Try to update the first record we find
       const updated = await base('tblM6K7Ii11HBkrW9').update([
         {
-          "id": record.id,
+          "id": records[0].id,
           "fields": {
-            "Extras": "TEST"
+            "Extras": "TEST BERNY ORDER"
           }
         }
       ]);
@@ -30,8 +29,8 @@ exports.handler = async (event, context) => {
         statusCode: 200,
         body: JSON.stringify({
           success: true,
-          recordId: record.id,
-          before: record.fields,
+          recordId: records[0].id,
+          before: records[0].fields,
           after: updated[0].fields
         })
       };
@@ -41,18 +40,16 @@ exports.handler = async (event, context) => {
       statusCode: 404,
       body: JSON.stringify({
         success: false,
-        message: 'No records found'
+        message: 'Berny order not found'
       })
     };
 
   } catch (error) {
-    console.error('Update error:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({
         success: false,
-        error: error.message,
-        stack: error.stack
+        error: error.message
       })
     };
   }
