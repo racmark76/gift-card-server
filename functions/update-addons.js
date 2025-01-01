@@ -24,19 +24,12 @@ exports.handler = async (event, context) => {
 
   try {
     const webhookData = JSON.parse(event.body);
-    console.log('Received data:', webhookData);
-    
     const { customerInfo, orderDetails } = webhookData[0];
     
     const updatePromises = orderDetails.orders.map(async (order) => {
       const formattedDate = formatDate(order.week);
-      console.log('Looking for record:', {
-        customer: customerInfo.name,
-        week: formattedDate,
-        day: order.day
-      });
 
-      const records = await base('Orders').select({
+      const records = await base('tblM6K7Ii11HBkrW9').select({
         filterByFormula: `AND(
           {Customer Name} = '${customerInfo.name}',
           {Week} = '${formattedDate}',
@@ -51,7 +44,7 @@ exports.handler = async (event, context) => {
           `${addon.name} (${addon.quantity})`
         ).join(', ');
 
-        return await base('Orders').update([{
+        return await base('tblM6K7Ii11HBkrW9').update([{
           id: records[0].id,
           fields: {
             'Extras': extrasString
@@ -80,7 +73,8 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Internal server error',
-        error: error.message
+        error: error.message,
+        details: JSON.stringify(error)
       })
     };
   }
