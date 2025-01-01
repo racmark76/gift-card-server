@@ -5,6 +5,11 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+// Function to format date (remove leading zeros)
+function formatDate(dateStr) {
+  return dateStr.replace(/^0+|\/0+/g, '/');
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -13,53 +18,58 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    console.log('Received event body:', event.body);
-    
     // Parse the webhook data
     const webhookData = JSON.parse(event.body);
-    console.log('Parsed webhook data:', webhookData);
-
-    // Validate data structure
-    if (!Array.isArray(webhookData) || !webhookData[0]?.customerInfo?.name) {
-      throw new Error('Invalid data structure');
-    }
-
     const { customerInfo, orderDetails } = webhookData[0];
-    console.log('Processing order for customer:', customerInfo.name);
 
     // Process each day's order and its add-ons
     const updatePromises = orderDetails.orders.map(async (order) => {
+      // Format the date by removing leading zeros
+      const formattedDate = formatDate(order.week);
+      
       // Get add-ons for this specific day
       const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
       const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
       
-      // Format add-ons string
-      const extrasString = dayAddOns.map(addon => 
-        `${addon.name} (${addon.quantity})`
-      ).join(', ');
-
-      console.log(`Looking for record: ${customerInfo.name}, ${order.week}, ${order.day}`);
+      console.log('Searching for:', {
+        customerName: customerInfo.name,
+        week: formattedDate,
+        day: order.day,
+        addOns: dayAddOns
+      });
 
       // Find and update the record in Airtable
       const records = await base('tblM6K7Ii11HBkrW9').select({
         filterByFormula: `AND(
           {Customer Name} = '${customerInfo.name}',
-          {Week} = '${order.week}',
+          {Week} = '${formattedDate}',
           {Day} = '${order.day}'
         )`
       }).firstPage();
 
+      console.log(`Found ${records.length} records for ${order.day}`);
+
       if (records.length > 0) {
-        console.log(`Updating record for ${order.day} with extras:`, extrasString);
-        return await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+        // Format add-ons string
+        const extrasString = dayAddOns.map(addon => 
+          `${addon.name} (${addon.quantity})`
+        ).join(', ');
+
+        console.log(`Updating ${order.day} with extras:`, extrasString);
+
+        // Update the record
+        const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
           'Extras': extrasString
         });
-      } else {
-        console.log(`No record found for ${order.day}`);
-        return null;
+
+        console.log(`Updated ${order.day} successfully`);
+        return updated;
       }
+
+      return null;
     });
 
+    // Wait for all updates to complete
     const results = await Promise.all(updatePromises);
     const successfulUpdates = results.filter(r => r !== null).length;
 
@@ -79,8 +89,7 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Internal server error',
-        error: error.message,
-        body: event.body
+        error: error.message
       })
     };
   }
