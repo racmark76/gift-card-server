@@ -17,13 +17,28 @@ exports.handler = async (event, context) => {
 
   try {
     const data = JSON.parse(event.body)[0];
-    console.log(`Starting process for customer: ${data.customerInfo.name}`);
-    console.log('Received add-ons:', JSON.stringify(data.orderDetails.addOns, null, 2));
+    console.log('Processing order for:', data.customerInfo.name);
+    console.log('Add-ons received:', JSON.stringify(data.orderDetails.addOns, null, 2));
 
-    // Get records with explicit fields
+    // Get all orders for the specific dates in the order
+    const dates = data.orderDetails.orders.map(order => order.week);
+    const orderDays = data.orderDetails.orders.map(order => order.day);
+    
+    console.log('Looking for days:', orderDays);
+    console.log('Looking for dates:', dates);
+
+    // Build OR filter for each day/date combination
+    const filters = data.orderDetails.orders.map(order => 
+      `AND({Customer Name} = '${data.customerInfo.name}', 
+           {Week} = '${order.week}', 
+           {Day} = '${order.day}')`
+    );
+
+    const formula = `OR(${filters.join(', ')})`;
+    console.log('Using filter:', formula);
+
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`,
-      fields: ['Customer Name', 'Day', 'Week', 'Extras']
+      filterByFormula: formula
     }).all();
 
     console.log(`Found ${records.length} records:`, 
@@ -33,15 +48,14 @@ exports.handler = async (event, context) => {
       }))
     );
 
+    // Process each record
     for (const record of records) {
       const day = record.get('Day');
-      console.log(`\nProcessing ${day} for ${data.customerInfo.name}`);
-      
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      
+      console.log(`Processing ${day}`);
       const dayAddOns = data.orderDetails.addOns[capitalizedDay] || [];
       
-      console.log(`Add-ons found for ${capitalizedDay}:`, dayAddOns);
-
       if (dayAddOns.length > 0) {
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
@@ -50,22 +64,19 @@ exports.handler = async (event, context) => {
         console.log(`Updating ${day} with: ${extrasString}`);
         
         try {
-          const updated = await base('tblM6K7Ii11HBkrW9').update([{
+          await base('tblM6K7Ii11HBkrW9').update([{
             id: record.id,
             fields: {
               'Extras': extrasString
             }
           }]);
-          
           console.log(`Successfully updated ${day}`);
-        } catch (updateError) {
-          console.error(`Failed to update ${day}:`, updateError);
+        } catch (error) {
+          console.error(`Error updating ${day}:`, error);
         }
 
-        // Wait before next update
+        // Wait between updates
         await new Promise(resolve => setTimeout(resolve, 1000));
-      } else {
-        console.log(`No add-ons to process for ${day}`);
       }
     }
 
@@ -75,13 +86,12 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         recordsFound: records.length,
-        customerName: data.customerInfo.name,
-        processedDays: records.map(r => r.get('Day'))
+        daysProcessed: records.map(r => r.get('Day'))
       })
     };
 
   } catch (error) {
-    console.error('Main error:', error);
+    console.error('Error:', error);
     return {
       statusCode: 500,
       headers,
