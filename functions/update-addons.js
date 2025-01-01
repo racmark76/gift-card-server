@@ -16,45 +16,65 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const data = JSON.parse(event.body)[0];
-    console.log('Processing order for:', data.customerInfo.name);
+    // Log the incoming data
+    console.log('Raw event body:', event.body);
     
-    // Create a map of all add-ons
-    const addOnsMap = {};
-    Object.entries(data.orderDetails.addOns).forEach(([day, addOns]) => {
-      // Convert Thursday -> thursday to match Airtable format
-      const lowercaseDay = day.toLowerCase();
-      addOnsMap[lowercaseDay] = addOns;
-    });
+    const data = JSON.parse(event.body)[0];
+    console.log('Parsed data:', JSON.stringify(data, null, 2));
+    
+    // Log customer info
+    console.log('Customer:', data.customerInfo.name);
+    console.log('Add-ons received:', data.orderDetails.addOns);
 
-    console.log('Add-ons map:', addOnsMap);
-
-    // Get all customer records
+    // Get all records first
     const records = await base('tblM6K7Ii11HBkrW9').select({
       filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
     }).all();
 
-    const updates = [];
-    for (const record of records) {
-      const day = record.get('Day'); // already lowercase from Airtable
-      const addOns = addOnsMap[day];
-      
-      console.log(`Processing ${day}, found add-ons:`, addOns);
+    console.log('Records found:', records.length);
+    console.log('Record days:', records.map(r => r.get('Day')));
 
-      if (addOns && addOns.length > 0) {
-        const extrasString = addOns.map(addon => 
+    let processedUpdates = [];
+
+    // Process each record one at a time
+    for (const record of records) {
+      const day = record.get('Day');
+      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      
+      console.log(`\nProcessing day: ${day}`);
+      console.log(`Looking for add-ons with key: ${capitalizedDay}`);
+      console.log('Available add-on keys:', Object.keys(data.orderDetails.addOns));
+
+      const dayAddOns = data.orderDetails.addOns[capitalizedDay];
+      console.log('Found add-ons:', dayAddOns);
+
+      if (dayAddOns && dayAddOns.length > 0) {
+        const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
         ).join(', ');
 
-        console.log(`Updating ${day} with: ${extrasString}`);
+        console.log(`Updating record ${record.id} for ${day} with: ${extrasString}`);
 
-        const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
-          'Extras': extrasString
-        });
-        updates.push({
-          day,
-          extras: extrasString
-        });
+        try {
+          const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
+            'Extras': extrasString
+          });
+          console.log(`Update successful for ${day}`);
+          processedUpdates.push({
+            day,
+            success: true,
+            extras: extrasString
+          });
+        } catch (updateError) {
+          console.error(`Error updating ${day}:`, updateError);
+          processedUpdates.push({
+            day,
+            success: false,
+            error: updateError.message
+          });
+        }
+      } else {
+        console.log(`No add-ons found for ${day}`);
       }
     }
 
@@ -63,14 +83,14 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
-        updates: updates.length,
-        details: updates,
-        processedDays: Object.keys(addOnsMap)
+        totalRecords: records.length,
+        updates: processedUpdates,
+        addOnDays: Object.keys(data.orderDetails.addOns)
       })
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Main error:', error);
     return {
       statusCode: 500,
       headers,
