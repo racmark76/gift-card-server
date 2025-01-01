@@ -7,7 +7,8 @@ const base = new Airtable({
 
 // Function to format date (remove leading zeros)
 function formatDate(dateStr) {
-  return dateStr.replace(/^0+|\/0+/g, '/');
+  const [month, day, year] = dateStr.split('/');
+  return `${parseInt(month)}/${parseInt(day)}/${year}`;
 }
 
 exports.handler = async (event, context) => {
@@ -18,51 +19,55 @@ exports.handler = async (event, context) => {
   };
 
   try {
+    console.log('Received body:', event.body);
+    
     // Parse the webhook data
     const webhookData = JSON.parse(event.body);
     const { customerInfo, orderDetails } = webhookData[0];
-
+    
     // Process each day's order and its add-ons
     const updatePromises = orderDetails.orders.map(async (order) => {
       // Format the date by removing leading zeros
       const formattedDate = formatDate(order.week);
       
-      // Get add-ons for this specific day
-      const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
-      const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
+      // Ensure day is lowercase
+      const dayLowercase = order.day.toLowerCase();
       
       console.log('Searching for:', {
-        customerName: customerInfo.name,
+        customerName: customerInfo.name.toLowerCase(),
         week: formattedDate,
-        day: order.day,
-        addOns: dayAddOns
+        day: dayLowercase
       });
 
-      // Find and update the record in Airtable
+      // Find the record in Airtable
       const records = await base('tblM6K7Ii11HBkrW9').select({
         filterByFormula: `AND(
-          {Customer Name} = '${customerInfo.name}',
+          {Customer Name} = '${customerInfo.name.toLowerCase()}',
           {Week} = '${formattedDate}',
-          {Day} = '${order.day}'
+          {Day} = '${dayLowercase}'
         )`
       }).firstPage();
 
-      console.log(`Found ${records.length} records for ${order.day}`);
+      console.log(`Found ${records.length} records for ${dayLowercase}`);
 
       if (records.length > 0) {
+        // Get add-ons for this day
+        const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
+        const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
+        
         // Format add-ons string
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
         ).join(', ');
 
-        console.log(`Updating ${order.day} with extras:`, extrasString);
+        console.log(`Updating ${dayLowercase} with extras:`, extrasString);
 
         // Update the record
         const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
           'Extras': extrasString
         });
 
-        console.log(`Updated ${order.day} successfully`);
+        console.log(`Updated record:`, updated.fields);
         return updated;
       }
 
@@ -78,7 +83,8 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Add-ons updated successfully',
-        updates: successfulUpdates
+        updates: successfulUpdates,
+        details: results.map(r => r?.fields || null)
       })
     };
 
@@ -89,7 +95,8 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Internal server error',
-        error: error.message
+        error: error.message,
+        stack: error.stack
       })
     };
   }
