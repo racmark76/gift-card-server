@@ -4,12 +4,6 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-function formatDate(dateStr) {
-  // Convert "01/20/2025" to "1/20/2025"
-  const [month, day, year] = dateStr.split('/');
-  return `${parseInt(month)}/${parseInt(day)}/${year}`;
-}
-
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -24,44 +18,30 @@ exports.handler = async (event, context) => {
   try {
     const data = JSON.parse(event.body)[0];
     console.log('Processing order for:', data.customerInfo.name);
-    console.log('Add-ons received:', JSON.stringify(data.orderDetails.addOns, null, 2));
 
-    // Build filter with formatted dates
-    const filters = data.orderDetails.orders.map(order => 
-      `AND({Customer Name} = '${data.customerInfo.name}', 
-           {Week} = '${formatDate(order.week)}', 
-           {Day} = '${order.day}')`
-    );
-
-    const formula = `OR(${filters.join(', ')})`;
-    console.log('Using filter:', formula);
-
+    // First just get ALL records for this customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: formula
+      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
     }).all();
 
-    console.log(`Found ${records.length} records:`, 
-      records.map(r => ({
-        day: r.get('Day'),
-        week: r.get('Week')
-      }))
-    );
+    console.log(`Found ${records.length} records for ${data.customerInfo.name}`);
 
-    // Process each record
+    // Process each record that has add-ons
     for (const record of records) {
       const day = record.get('Day');
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
       
-      console.log(`Processing ${day}`);
+      // Check if there are add-ons for this day
       const dayAddOns = data.orderDetails.addOns[capitalizedDay] || [];
       
       if (dayAddOns.length > 0) {
+        console.log(`Found add-ons for ${day}:`, dayAddOns);
+        
+        // Format the extras string
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
         ).join(', ');
 
-        console.log(`Updating ${day} with: ${extrasString}`);
-        
         try {
           await base('tblM6K7Ii11HBkrW9').update([{
             id: record.id,
@@ -69,14 +49,13 @@ exports.handler = async (event, context) => {
               'Extras': extrasString
             }
           }]);
-          console.log(`Successfully updated ${day}`);
-          
-          // Wait between updates
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-        } catch (error) {
-          console.error(`Error updating ${day}:`, error);
+          console.log(`Updated ${day} with: ${extrasString}`);
+        } catch (updateError) {
+          console.error(`Error updating ${day}:`, updateError);
         }
+
+        // Wait between updates
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -85,8 +64,9 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
+        customerName: data.customerInfo.name,
         recordsFound: records.length,
-        daysProcessed: records.map(r => r.get('Day'))
+        addOnsAvailable: Object.keys(data.orderDetails.addOns)
       })
     };
 
