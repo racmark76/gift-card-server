@@ -4,7 +4,6 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-// Function to remove leading zeros from date parts
 function formatDate(dateStr) {
   const [month, day, year] = dateStr.split('/');
   return `${parseInt(month)}/${parseInt(day)}/${year}`;
@@ -18,20 +17,18 @@ exports.handler = async (event, context) => {
   };
 
   try {
+    // Parse the incoming data
     const webhookData = JSON.parse(event.body);
+    console.log('Received webhook data:', JSON.stringify(webhookData, null, 2));
+    
     const { customerInfo, orderDetails } = webhookData[0];
     
+    // Process each order
     const updatePromises = orderDetails.orders.map(async (order) => {
-      // Convert "01/06/2025" to "1/6/2025"
+      // Format the date to match Airtable (1/6/2025)
       const formattedDate = formatDate(order.week);
       
-      console.log('Searching for:', {
-        customerName: customerInfo.name,
-        week: formattedDate,
-        day: order.day
-      });
-
-      // First try to find the record
+      // Find the matching record
       const records = await base('tblM6K7Ii11HBkrW9').select({
         filterByFormula: `AND(
           {Customer Name} = '${customerInfo.name}',
@@ -40,10 +37,8 @@ exports.handler = async (event, context) => {
         )`
       }).firstPage();
 
-      console.log(`Found ${records.length} records for ${order.day}`);
-
       if (records.length > 0) {
-        // Get add-ons for this specific day
+        // Check if there are add-ons for this day
         const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
         const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
         
@@ -55,16 +50,14 @@ exports.handler = async (event, context) => {
         console.log(`Updating ${order.day} with extras:`, extrasString);
 
         // Update the record
-        const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+        return await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
           'Extras': extrasString
         });
-
-        return updated;
       }
-
       return null;
     });
 
+    // Wait for all updates to complete
     const results = await Promise.all(updatePromises);
     const successfulUpdates = results.filter(r => r !== null).length;
 
@@ -77,7 +70,8 @@ exports.handler = async (event, context) => {
         searchCriteria: orderDetails.orders.map(order => ({
           customerName: customerInfo.name,
           week: formatDate(order.week),
-          day: order.day
+          day: order.day,
+          hasAddOns: !!orderDetails.addOns[order.day.charAt(0).toUpperCase() + order.day.slice(1)]
         }))
       })
     };
@@ -89,7 +83,8 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Internal server error',
-        error: error.message
+        error: error.message,
+        receivedBody: event.body
       })
     };
   }
