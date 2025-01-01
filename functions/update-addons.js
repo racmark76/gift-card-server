@@ -12,41 +12,45 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    // Get first 5 records to check what we're dealing with
-    const checkRecords = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 5
+    // Find Berny's Monday order
+    const records = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `AND(
+        {Customer Name} = 'Berny',
+        {Week} = '1/6/2025',
+        {Day} = 'monday'
+      )`
     }).firstPage();
 
-    console.log('Sample records:', checkRecords.map(r => ({
-      id: r.id,
-      name: r.get('Customer Name'),
-      day: r.get('Day'),
-      week: r.get('Week'),
-      extras: r.get('Extras')
-    })));
+    console.log('Found records:', records.length);
 
-    // Now try to update one specific record
-    const firstRecord = checkRecords[0];
-    if (firstRecord) {
-      console.log('Attempting to update record:', firstRecord.id);
-      
-      const updated = await base('tblM6K7Ii11HBkrW9').update(firstRecord.id, {
-        'Extras': 'Test Update'
+    if (records.length > 0) {
+      // Try to update the Extras field
+      const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+        'Extras': 'Test Add-On'
       });
 
-      console.log('Update result:', {
-        id: updated.id,
-        extras: updated.get('Extras')
-      });
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          message: 'Update attempted',
+          recordId: records[0].id,
+          foundRecords: records.length,
+          updatedRecord: {
+            customerName: updated.fields['Customer Name'],
+            week: updated.fields['Week'],
+            day: updated.fields['Day'],
+            extras: updated.fields['Extras']
+          }
+        })
+      };
     }
 
     return {
-      statusCode: 200,
+      statusCode: 404,
       headers,
       body: JSON.stringify({
-        message: 'Debug run complete',
-        recordsFound: checkRecords.length,
-        updateAttempted: firstRecord ? true : false
+        message: 'Record not found'
       })
     };
 
