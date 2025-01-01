@@ -4,8 +4,11 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+// Helper function to delay between updates
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function updateRecord(record, addOns) {
-  const day = record.get('Day'); // lowercase from airtable
+  const day = record.get('Day');
   const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
   const dayAddOns = addOns[capitalizedDay] || [];
 
@@ -18,10 +21,22 @@ async function updateRecord(record, addOns) {
       await base('tblM6K7Ii11HBkrW9').update(record.id, {
         'Extras': extrasString
       });
-      return { day, success: true, extras: extrasString };
+
+      // Wait a bit after each update
+      await delay(500);
+      
+      return { 
+        day, 
+        success: true, 
+        extras: extrasString
+      };
     } catch (error) {
-      console.error(`Failed to update ${day}:`, error);
-      return { day, success: false, error: error.message };
+      console.error(`Error updating ${day}:`, error);
+      return { 
+        day, 
+        success: false, 
+        error: error.message 
+      };
     }
   }
   return { day, success: true, extras: null };
@@ -41,16 +56,17 @@ exports.handler = async (event, context) => {
   try {
     const data = JSON.parse(event.body)[0];
     
-    // Get all records for this customer
+    // Get all records
     const records = await base('tblM6K7Ii11HBkrW9').select({
       filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
     }).all();
 
-    // Update each record one at a time
+    // Process records sequentially with delay
     const updates = [];
     for (const record of records) {
       const result = await updateRecord(record, data.orderDetails.addOns);
       updates.push(result);
+      await delay(500); // Wait between records
     }
 
     return {
@@ -60,7 +76,8 @@ exports.handler = async (event, context) => {
         success: true,
         customerName: data.customerInfo.name,
         updates: updates,
-        recordCount: records.length
+        processedCount: updates.length,
+        addOnDays: Object.keys(data.orderDetails.addOns)
       })
     };
 
@@ -76,7 +93,6 @@ exports.handler = async (event, context) => {
     };
   }
 };
-
 
 
 
