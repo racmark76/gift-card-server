@@ -13,46 +13,54 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    const webhookData = JSON.parse(event.body)[0];
-    const { customerInfo, orderDetails } = webhookData;
-
-    // Get all records for this customer
-    const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerInfo.name}'`
-    }).firstPage();
-
-    console.log('Found records:', customerRecords.length);
-
-    // Process updates
-    const updatePromises = customerRecords.map(async (record) => {
-      const recordDay = record.fields['Day'];  // Get the day from the record
-      const dayCapitalized = recordDay.charAt(0).toUpperCase() + recordDay.slice(1);
-      
-      // Get add-ons for this day
-      const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
-      
-      // Format add-ons string
-      const extrasString = dayAddOns.map(addon => 
-        `${addon.name} (${addon.quantity})`
-      ).join(', ');
-
-      console.log(`Updating ${recordDay} with extras:`, extrasString);
-
-      // Update the record
-      return await base('tblM6K7Ii11HBkrW9').update(record.id, {
-        'Extras': extrasString
-      });
+    console.log('Received body:', event.body);
+    const data = JSON.parse(event.body);
+    const { customerInfo, currentDay, week, addOns } = data;
+    
+    console.log('Processing update for:', {
+      customer: customerInfo.name,
+      day: currentDay,
+      week: week,
+      addOns: addOns
     });
 
-    // Wait for all updates
-    const results = await Promise.all(updatePromises);
-    
+    // Find the specific record for this customer and day
+    const records = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `AND(
+        {Customer Name} = '${customerInfo.name}',
+        {Week} = '${week}',
+        {Day} = '${currentDay.toLowerCase()}'
+      )`
+    }).firstPage();
+
+    if (records.length > 0) {
+      // Format add-ons string
+      const extrasString = addOns 
+        ? addOns.map(addon => `${addon.name} (${addon.quantity})`).join(', ')
+        : '';
+
+      // Update the record
+      await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+        'Extras': extrasString
+      });
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          message: 'Add-on updated successfully',
+          day: currentDay,
+          extras: extrasString
+        })
+      };
+    }
+
     return {
-      statusCode: 200,
+      statusCode: 404,
       headers,
-      body: JSON.stringify({ 
-        message: 'Add-ons updated successfully',
-        updates: results.length
+      body: JSON.stringify({
+        message: 'Record not found',
+        day: currentDay
       })
     };
 
