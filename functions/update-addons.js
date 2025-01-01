@@ -1,28 +1,21 @@
 const Airtable = require('airtable');
 
-// Configure Airtable - using existing environment variables
+// Configure Airtable
 const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
-  // Enable CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
-  // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: ''
-    };
+    return { statusCode: 200, headers, body: '' };
   }
 
-  // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
@@ -32,46 +25,54 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('Received event:', event.body);
-    const payload = JSON.parse(event.body);
+    // Parse the webhook data
+    const webhookData = JSON.parse(event.body)[0]; // Get first element since it's an array
+    const { customerInfo, orderDetails } = webhookData;
     
-    // Log the parsed payload for debugging
-    console.log('Parsed payload:', payload);
-
-    // Find and update the record in Airtable
-    const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `AND(
-        {Customer Name} = '${payload.customerName}',
-        {Week} = '${payload.date}'
-      )`
-    }).firstPage();
-
-    console.log('Found records:', records);
-
-    if (records.length > 0) {
-      // Update the extras field
-      const updatedRecord = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
-        'Extras': payload.extras.join(', ')
-      });
+    // Process each day's order and its add-ons
+    const updatePromises = orderDetails.orders.map(async (order) => {
+      const dayLowerCase = order.day.toLowerCase();
       
-      console.log('Updated record:', updatedRecord);
+      // Get add-ons for this specific day
+      const dayAddOns = orderDetails.addOns[order.day] || orderDetails.addOns[order.day.charAt(0).toUpperCase() + order.day.slice(1)] || [];
       
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ 
-          message: 'Add-ons updated successfully',
-          record: updatedRecord
-        })
-      };
-    } else {
-      console.log('No records found for:', payload);
-      return {
-        statusCode: 404,
-        headers,
-        body: JSON.stringify({ message: 'Record not found' })
-      };
-    }
+      // Format add-ons string
+      const extrasString = dayAddOns.map(addon => 
+        `${addon.name} (${addon.quantity})`
+      ).join(', ');
+
+      console.log(`Updating ${dayLowerCase} for ${customerInfo.name} with extras: ${extrasString}`);
+
+      // Find and update the record in Airtable
+      const records = await base('tblM6K7Ii11HBkrW9').select({
+        filterByFormula: `AND(
+          {Customer Name} = '${customerInfo.name}',
+          {Week} = '${order.week}',
+          {Day} = '${dayLowerCase}'
+        )`
+      }).firstPage();
+
+      if (records.length > 0) {
+        return base('tblM6K7Ii11HBkrW9').update(records[0].id, {
+          'Extras': extrasString || '' // Use empty string if no extras
+        });
+      } else {
+        console.log(`No record found for ${customerInfo.name} on ${order.week} ${dayLowerCase}`);
+        return null;
+      }
+    });
+
+    // Wait for all updates to complete
+    const results = await Promise.all(updatePromises);
+    
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ 
+        message: 'Add-ons updated successfully',
+        updates: results.filter(r => r !== null).length
+      })
+    };
 
   } catch (error) {
     console.error('Error:', error);
