@@ -1,15 +1,8 @@
 const Airtable = require('airtable');
 
-// Configure Airtable
 const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
-
-// Function to format date (remove leading zeros)
-function formatDate(dateStr) {
-  const [month, day, year] = dateStr.split('/');
-  return `${parseInt(month)}/${parseInt(day)}/${year}`;
-}
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -19,72 +12,59 @@ exports.handler = async (event, context) => {
   };
 
   try {
-    console.log('Received body:', event.body);
-    
-    // Parse the webhook data
-    const webhookData = JSON.parse(event.body);
-    const { customerInfo, orderDetails } = webhookData[0];
-    
-    // Process each day's order and its add-ons
-    const updatePromises = orderDetails.orders.map(async (order) => {
-      // Format the date by removing leading zeros
-      const formattedDate = formatDate(order.week);
-      
-      // Ensure day is lowercase
-      const dayLowercase = order.day.toLowerCase();
-      
-      console.log('Searching for:', {
-        customerName: customerInfo.name.toLowerCase(),
-        week: formattedDate,
-        day: dayLowercase
+    // First, let's get ALL records to see what's in Airtable
+    console.log('Getting all records...');
+    const allRecords = await base('tblM6K7Ii11HBkrW9').select({
+      maxRecords: 10
+    }).firstPage();
+
+    console.log('First few records in Airtable:');
+    allRecords.forEach(record => {
+      console.log({
+        customerName: record.fields['Customer Name'],
+        week: record.fields['Week'],
+        day: record.fields['Day']
       });
-
-      // Find the record in Airtable
-      const records = await base('tblM6K7Ii11HBkrW9').select({
-        filterByFormula: `AND(
-          {Customer Name} = '${customerInfo.name.toLowerCase()}',
-          {Week} = '${formattedDate}',
-          {Day} = '${dayLowercase}'
-        )`
-      }).firstPage();
-
-      console.log(`Found ${records.length} records for ${dayLowercase}`);
-
-      if (records.length > 0) {
-        // Get add-ons for this day
-        const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
-        const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
-        
-        // Format add-ons string
-        const extrasString = dayAddOns.map(addon => 
-          `${addon.name} (${addon.quantity})`
-        ).join(', ');
-
-        console.log(`Updating ${dayLowercase} with extras:`, extrasString);
-
-        // Update the record
-        const updated = await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
-          'Extras': extrasString
-        });
-
-        console.log(`Updated record:`, updated.fields);
-        return updated;
-      }
-
-      return null;
     });
 
-    // Wait for all updates to complete
-    const results = await Promise.all(updatePromises);
-    const successfulUpdates = results.filter(r => r !== null).length;
+    // Now process our update
+    const webhookData = JSON.parse(event.body);
+    const { customerInfo, orderDetails } = webhookData[0];
+
+    // For debugging, log what we're looking for
+    console.log('Looking for:', {
+      customerName: customerInfo.name,
+      order: orderDetails.orders[0]
+    });
+
+    // Try just finding by customer name first
+    const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `{Customer Name} = '${customerInfo.name}'`
+    }).firstPage();
+
+    console.log('Records found by customer name:', customerRecords.length);
+    
+    if (customerRecords.length > 0) {
+      console.log('Sample customer record:', {
+        customerName: customerRecords[0].fields['Customer Name'],
+        week: customerRecords[0].fields['Week'],
+        day: customerRecords[0].fields['Day']
+      });
+    }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        message: 'Add-ons updated successfully',
-        updates: successfulUpdates,
-        details: results.map(r => r?.fields || null)
+        message: 'Debug information',
+        totalRecords: allRecords.length,
+        customerRecords: customerRecords.length,
+        sampleData: allRecords[0]?.fields,
+        lookingFor: {
+          customerName: customerInfo.name,
+          week: orderDetails.orders[0].week,
+          day: orderDetails.orders[0].day
+        }
       })
     };
 
@@ -95,8 +75,7 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         message: 'Internal server error',
-        error: error.message,
-        stack: error.stack
+        error: error.message
       })
     };
   }
