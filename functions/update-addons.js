@@ -4,10 +4,6 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-function capitalizeDay(day) {
-  return day.charAt(0).toUpperCase() + day.slice(1).toLowerCase();
-}
-
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -21,32 +17,42 @@ exports.handler = async (event, context) => {
 
   try {
     const data = JSON.parse(event.body)[0];
-    const { customerInfo, orderDetails } = data;
+    console.log('Processing order for:', data.customerInfo.name);
+    
+    // Create a map of all add-ons
+    const addOnsMap = {};
+    Object.entries(data.orderDetails.addOns).forEach(([day, addOns]) => {
+      // Convert Thursday -> thursday to match Airtable format
+      const lowercaseDay = day.toLowerCase();
+      addOnsMap[lowercaseDay] = addOns;
+    });
 
-    // Get customer records
+    console.log('Add-ons map:', addOnsMap);
+
+    // Get all customer records
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerInfo.name}'`
+      filterByFormula: `{Customer Name} = '${data.customerInfo.name}'`
     }).all();
 
     const updates = [];
     for (const record of records) {
-      // Get day from record and capitalize it for addOns lookup
-      const recordDay = record.get('Day'); // lowercase from Airtable
-      const dayForAddOns = capitalizeDay(recordDay); // Capitalize for addOns lookup
+      const day = record.get('Day'); // already lowercase from Airtable
+      const addOns = addOnsMap[day];
       
-      // Look for add-ons for this day
-      const dayAddOns = orderDetails.addOns[dayForAddOns] || [];
-      
-      if (dayAddOns.length > 0) {
-        const extrasString = dayAddOns.map(addon => 
+      console.log(`Processing ${day}, found add-ons:`, addOns);
+
+      if (addOns && addOns.length > 0) {
+        const extrasString = addOns.map(addon => 
           `${addon.name} (${addon.quantity})`
         ).join(', ');
-        
+
+        console.log(`Updating ${day} with: ${extrasString}`);
+
         const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
           'Extras': extrasString
         });
         updates.push({
-          day: recordDay,
+          day,
           extras: extrasString
         });
       }
@@ -58,7 +64,8 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         updates: updates.length,
-        details: updates
+        details: updates,
+        processedDays: Object.keys(addOnsMap)
       })
     };
 
@@ -69,13 +76,12 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message
+        error: error.message,
+        stack: error.stack
       })
     };
   }
 };
-
-
 
 
 
