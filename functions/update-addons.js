@@ -6,6 +6,8 @@ const base = new Airtable({
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
+  console.log('1. Function started');
+  
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -13,77 +15,52 @@ exports.handler = async (event, context) => {
   };
 
   try {
+    console.log('2. Raw event body:', event.body);
+    
     // Parse the webhook data
     const webhookData = JSON.parse(event.body)[0];
-    console.log('Received webhook data:', JSON.stringify(webhookData, null, 2));
+    console.log('3. Parsed webhook data:', JSON.stringify(webhookData, null, 2));
     
     const { customerInfo, orderDetails } = webhookData;
-    
-    // Process each day's order and its add-ons
-    const updatePromises = orderDetails.orders.map(async (order) => {
-      // Convert date format from 01/06/2025 to 1/6/2025
-      const formattedDate = order.week.replace(/^0|\/0/g, '/');
-      
-      // Get add-ons for this specific day
-      const dayCapitalized = order.day.charAt(0).toUpperCase() + order.day.slice(1);
-      const dayAddOns = orderDetails.addOns[dayCapitalized] || [];
-      
-      // Format add-ons string
-      const extrasString = dayAddOns.map(addon => 
-        `${addon.name} (${addon.quantity})`
-      ).join(', ');
+    console.log('4. Customer info:', customerInfo);
+    console.log('5. Order details:', orderDetails);
 
-      const filterFormula = `AND(
-        {Customer Name} = '${customerInfo.name}',
-        {Week} = '${formattedDate}',
-        {Day} = '${order.day.toLowerCase()}'
-      )`;
+    // First, let's just try to get ANY records from the table
+    console.log('6. Attempting to read from Airtable');
+    const testRecords = await base('tblM6K7Ii11HBkrW9').select({
+      maxRecords: 1
+    }).firstPage();
+    console.log('7. Test record fields:', testRecords[0]?.fields);
 
-      console.log('Searching with:', {
-        customerName: customerInfo.name,
-        week: formattedDate,
-        day: order.day.toLowerCase(),
-        filterFormula
-      });
+    // Now try our actual query
+    console.log('8. Searching for customer:', customerInfo.name);
+    const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `{Customer Name} = '${customerInfo.name}'`
+    }).firstPage();
+    console.log('9. Found customer records:', customerRecords.length);
 
-      // Find and update the record in Airtable
-      const records = await base('tblM6K7Ii11HBkrW9').select({
-        filterByFormula: filterFormula
-      }).firstPage();
+    if (customerRecords.length > 0) {
+      console.log('10. Customer record fields:', customerRecords[0].fields);
+    }
 
-      console.log('Found records:', records.length);
-
-      if (records.length > 0) {
-        console.log('Updating record with extras:', extrasString);
-        return await base('tblM6K7Ii11HBkrW9').update(records[0].id, {
-          'Extras': extrasString
-        });
-      } else {
-        console.log('No record found matching criteria');
-        return null;
-      }
-    });
-
-    const results = await Promise.all(updatePromises);
-    const successfulUpdates = results.filter(r => r !== null).length;
-    
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({ 
-        message: 'Add-ons updated successfully',
-        updates: successfulUpdates,
+        message: 'Debug run completed',
+        foundRecords: customerRecords.length
       })
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error occurred:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         message: 'Internal server error', 
-        error: error.message 
+        error: error.message,
+        stack: error.stack 
       })
     };
   }
