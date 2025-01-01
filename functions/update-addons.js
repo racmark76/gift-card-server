@@ -6,8 +6,7 @@ const base = new Airtable({
 
 exports.handler = async (event, context) => {
   try {
-    // Find Berny's specific order
-    const records = await base('tblM6K7Ii11HBkrW9').select({
+    const records = await base('Orders').select({
       filterByFormula: `AND(
         {Customer Name} = 'Berny',
         {Week} = '1/6/2025',
@@ -16,41 +15,29 @@ exports.handler = async (event, context) => {
     }).firstPage();
 
     if (records.length > 0) {
-      const updated = await base('tblM6K7Ii11HBkrW9').update([
-        {
-          "id": records[0].id,
-          "fields": {
-            "Extras": "TEST BERNY ORDER"
-          }
-        }
-      ]);
+      const updated = await base('Orders').update(records[0].id, {
+        'Extras': 'TEST BERNY EXTRAS'
+      });
 
       return {
         statusCode: 200,
         body: JSON.stringify({
           success: true,
-          recordId: records[0].id,
-          before: records[0].fields,
-          after: updated[0].fields
+          fields: updated.fields
         })
       };
     }
 
     return {
       statusCode: 404,
-      body: JSON.stringify({
-        success: false,
-        message: 'Berny order not found'
-      })
+      body: JSON.stringify({ message: 'Record not found' })
     };
 
   } catch (error) {
+    console.error('Error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({
-        success: false,
-        error: error.message
-      })
+      body: JSON.stringify({ error: error.message })
     };
   }
 };
