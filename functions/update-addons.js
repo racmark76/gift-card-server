@@ -4,6 +4,12 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+function formatDate(dateStr) {
+  // Convert date from "01/20/2025" to "1/20/2025"
+  const [month, day, year] = dateStr.split('/');
+  return `${parseInt(month)}/${parseInt(day)}/${year}`;
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -18,12 +24,13 @@ exports.handler = async (event, context) => {
   try {
     const data = JSON.parse(event.body)[0];
     console.log('Processing order for:', data.customerInfo.name);
+    console.log('Orders:', data.orderDetails.orders);
+    console.log('Add-ons:', data.orderDetails.addOns);
 
-    // Build filter for all dates and days
+    // Build filter using the exact date format from Airtable
     const dateFilters = data.orderDetails.orders.map(order => {
-      const dateArr = order.week.split('/');
-      const airtableDate = `${dateArr[2]}-${dateArr[0].padStart(2, '0')}-${dateArr[1].padStart(2, '0')}`;
-      return `AND({Customer Name} = '${data.customerInfo.name}', {Week} = '${airtableDate}')`
+      const formattedDate = formatDate(order.week);
+      return `AND({Customer Name} = '${data.customerInfo.name}', {Week} = '${formattedDate}')`
     });
 
     const filterFormula = `OR(${dateFilters.join(', ')})`;
@@ -35,8 +42,10 @@ exports.handler = async (event, context) => {
     }).all();
 
     console.log('Found records:', records.map(r => ({
+      id: r.id,
       day: r.get('Day'),
-      week: r.get('Week')
+      week: r.get('Week'),
+      customer: r.get('Customer Name')
     })));
 
     // Process updates
@@ -44,6 +53,7 @@ exports.handler = async (event, context) => {
     for (const record of records) {
       const day = record.get('Day');
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      console.log(`Processing ${day} (${capitalizedDay})`);
       
       const dayAddOns = data.orderDetails.addOns[capitalizedDay] || [];
       
@@ -57,6 +67,7 @@ exports.handler = async (event, context) => {
           const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
             'Extras': extrasString
           });
+          console.log(`Updated ${day} successfully`);
           updates.push({
             day,
             extras: extrasString,
@@ -97,7 +108,6 @@ exports.handler = async (event, context) => {
     };
   }
 };
-
 
 
 // const Airtable = require('airtable');
