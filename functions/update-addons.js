@@ -4,12 +4,6 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-function formatDate(dateStr) {
-  // Convert date from "01/20/2025" to "1/20/2025"
-  const [month, day, year] = dateStr.split('/');
-  return `${parseInt(month)}/${parseInt(day)}/${year}`;
-}
-
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -23,65 +17,46 @@ exports.handler = async (event, context) => {
 
   try {
     const data = JSON.parse(event.body)[0];
-    console.log('Processing order for:', data.customerInfo.name);
-    console.log('Orders:', data.orderDetails.orders);
-    console.log('Add-ons:', data.orderDetails.addOns);
+    const customerName = data.customerInfo.name;
+    console.log('\nDEBUG INFORMATION:');
+    console.log('1. Customer name:', customerName);
 
-    // Build filter using the exact date format from Airtable
-    const dateFilters = data.orderDetails.orders.map(order => {
-      const formattedDate = formatDate(order.week);
-      return `AND({Customer Name} = '${data.customerInfo.name}', {Week} = '${formattedDate}')`
-    });
-
-    const filterFormula = `OR(${dateFilters.join(', ')})`;
-    console.log('Using filter:', filterFormula);
-
-    // Get all matching records
-    const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: filterFormula
+    // First get ANY records for this customer
+    console.log('\n2. Searching by customer name only...');
+    const customerRecords = await base('tblM6K7Ii11HBkrW9').select({
+      filterByFormula: `{Customer Name} = '${customerName}'`
     }).all();
 
-    console.log('Found records:', records.map(r => ({
-      id: r.id,
-      day: r.get('Day'),
-      week: r.get('Week'),
-      customer: r.get('Customer Name')
-    })));
+    console.log('Found records:', customerRecords.length);
+    if (customerRecords.length > 0) {
+      console.log('Sample records:', customerRecords.map(r => ({
+        customer: r.get('Customer Name'),
+        day: r.get('Day'),
+        week: r.get('Week'),
+      })));
+    }
 
-    // Process updates
-    const updates = [];
-    for (const record of records) {
-      const day = record.get('Day');
-      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
-      console.log(`Processing ${day} (${capitalizedDay})`);
-      
-      const dayAddOns = data.orderDetails.addOns[capitalizedDay] || [];
-      
-      if (dayAddOns.length > 0) {
-        const extrasString = dayAddOns.map(addon => 
-          `${addon.name} (${addon.quantity})`
-        ).join(', ');
+    // Now try finding by specific weeks
+    console.log('\n3. Order weeks we are looking for:');
+    data.orderDetails.orders.forEach(order => {
+      console.log(`- ${order.week} (${order.day})`);
+    });
 
-        try {
-          console.log(`Updating ${day} with:`, extrasString);
-          const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
-            'Extras': extrasString
-          });
-          console.log(`Updated ${day} successfully`);
-          updates.push({
-            day,
-            extras: extrasString,
-            success: true
-          });
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (error) {
-          console.error(`Error updating ${day}:`, error);
-          updates.push({
-            day,
-            success: false,
-            error: error.message
-          });
-        }
+    // Try each date format
+    console.log('\n4. Testing different date formats...');
+    for (const order of data.orderDetails.orders) {
+      const testFormats = [
+        order.week, // Original format "01/20/2025"
+        order.week.replace(/^0/, ''), // Remove leading zero "1/20/2025"
+        order.week.replace(/\/0/g, '/'), // Remove all leading zeros "1/1/2025"
+      ];
+
+      for (const dateFormat of testFormats) {
+        const testRecords = await base('tblM6K7Ii11HBkrW9').select({
+          filterByFormula: `AND({Customer Name} = '${customerName}', {Week} = '${dateFormat}')`
+        }).all();
+
+        console.log(`Testing date format "${dateFormat}": found ${testRecords.length} records`);
       }
     }
 
@@ -89,10 +64,9 @@ exports.handler = async (event, context) => {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        success: true,
-        customerName: data.customerInfo.name,
-        recordsFound: records.length,
-        updates: updates
+        message: 'Debug complete - check logs',
+        customerName: customerName,
+        initialRecordsFound: customerRecords.length
       })
     };
 
