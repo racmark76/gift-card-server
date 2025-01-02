@@ -5,31 +5,37 @@ const base = new Airtable({
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
+  // Add CORS headers
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    'Content-Type': 'application/json'
   };
 
+  // Handle preflight request
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
+    return {
+      statusCode: 204,
+      headers
+    };
   }
 
   try {
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
 
-    // First print all available addOns
-    console.log('Add-ons available:', Object.keys(data.orderDetails.addOns));
-
-    // Simply get all records for this customer
+    console.log('Processing order for:', customerName);
+    
+    // Get all records for this customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `SEARCH('${customerName}', {Customer Name})`
+      filterByFormula: `{Customer Name} = '${customerName}'`
     }).all();
 
-    console.log(`Found ${records.length} records for ${customerName}`);
+    console.log(`Found ${records.length} records`);
 
-    // Process each found record
+    // Process each record
+    const updates = [];
     for (const record of records) {
       const day = record.get('Day');
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
@@ -44,6 +50,7 @@ exports.handler = async (event, context) => {
           await base('tblM6K7Ii11HBkrW9').update(record.id, {
             'Extras': extrasString
           });
+          updates.push({ day, extras: extrasString });
           console.log(`Updated ${day} with: ${extrasString}`);
         } catch (error) {
           console.error(`Failed to update ${day}:`, error);
@@ -53,9 +60,11 @@ exports.handler = async (event, context) => {
 
     return {
       statusCode: 200,
+      headers,
       body: JSON.stringify({
         success: true,
-        recordsFound: records.length
+        recordsFound: records.length,
+        updates: updates
       })
     };
 
@@ -63,6 +72,7 @@ exports.handler = async (event, context) => {
     console.error('Error:', error);
     return {
       statusCode: 500,
+      headers,
       body: JSON.stringify({
         success: false,
         error: error.message
