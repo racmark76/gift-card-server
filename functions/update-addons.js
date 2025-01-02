@@ -4,6 +4,12 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
+function formatDate(dateStr) {
+  // Convert from "01/20/2025" to "1/20/2025"
+  const [month, day, year] = dateStr.split('/');
+  return `${parseInt(month)}/${day}/${year}`;
+}
+
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
@@ -20,37 +26,37 @@ exports.handler = async (event, context) => {
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
     
+    // Create a map of formatted dates
+    const dateMap = data.orderDetails.orders.reduce((acc, order) => {
+      acc[formatDate(order.week)] = order.day;
+      return acc;
+    }, {});
+
     console.log('Processing order for:', customerName);
-    console.log('Order dates:', data.orderDetails.orders.map(o => o.week));
+    console.log('Looking for dates:', Object.keys(dateMap));
 
-    // Create OR conditions for each day's date
-    const dateConditions = data.orderDetails.orders.map(order => 
-      `{Week} = '${order.week}'`
-    );
-    
-    const formula = `AND({Customer Name} = '${customerName}', OR(${dateConditions.join(', ')}))`;
-    console.log('Using filter:', formula);
-
-    // Get records for this customer and these specific dates
+    // Get records for this customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: formula
+      filterByFormula: `{Customer Name} = '${customerName}'`
     }).all();
 
     console.log(`Found ${records.length} records`);
 
-    // Track processed days to avoid duplicates
-    const processedDays = new Set();
+    // Track processed dates to avoid duplicates
+    const processedCombos = new Set();
     const updates = [];
 
     for (const record of records) {
+      const week = record.get('Week');
       const day = record.get('Day');
+      const comboKey = `${week}-${day}`;
       
-      // Skip if we already processed this day
-      if (processedDays.has(day)) {
-        console.log(`Skipping duplicate day: ${day}`);
+      // Skip if we already processed this date+day combination
+      if (processedCombos.has(comboKey)) {
+        console.log(`Skipping duplicate: ${comboKey}`);
         continue;
       }
-      
+
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
       const dayAddOns = data.orderDetails.addOns[capitalizedDay];
 
@@ -63,11 +69,11 @@ exports.handler = async (event, context) => {
           await base('tblM6K7Ii11HBkrW9').update(record.id, {
             'Extras': extrasString
           });
-          updates.push({ day, extras: extrasString });
-          processedDays.add(day);
-          console.log(`Updated ${day} with: ${extrasString}`);
+          updates.push({ day, week, extras: extrasString });
+          processedCombos.add(comboKey);
+          console.log(`Updated ${day} (${week}) with: ${extrasString}`);
         } catch (error) {
-          console.error(`Failed to update ${day}:`, error);
+          console.error(`Failed to update ${day} (${week}):`, error);
         }
       }
     }
@@ -78,7 +84,7 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         recordsFound: records.length,
-        uniqueDaysProcessed: processedDays.size,
+        uniqueUpdates: processedCombos.size,
         updates: updates
       })
     };
