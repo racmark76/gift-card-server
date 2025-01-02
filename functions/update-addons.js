@@ -5,7 +5,6 @@ const base = new Airtable({
 }).base('appYJ9gWRBFOLfb0r');
 
 exports.handler = async (event, context) => {
-  // Add CORS headers
   const headers = {
     'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -13,34 +12,48 @@ exports.handler = async (event, context) => {
     'Content-Type': 'application/json'
   };
 
-  // Handle preflight request
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers
-    };
+    return { statusCode: 204, headers };
   }
 
   try {
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
-
-    console.log('Processing order for:', customerName);
     
-    // Get all records for this customer
+    console.log('Processing order for:', customerName);
+    console.log('Order dates:', data.orderDetails.orders.map(o => o.week));
+
+    // Create OR conditions for each day's date
+    const dateConditions = data.orderDetails.orders.map(order => 
+      `{Week} = '${order.week}'`
+    );
+    
+    const formula = `AND({Customer Name} = '${customerName}', OR(${dateConditions.join(', ')}))`;
+    console.log('Using filter:', formula);
+
+    // Get records for this customer and these specific dates
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerName}'`
+      filterByFormula: formula
     }).all();
 
     console.log(`Found ${records.length} records`);
 
-    // Process each record
+    // Track processed days to avoid duplicates
+    const processedDays = new Set();
     const updates = [];
+
     for (const record of records) {
       const day = record.get('Day');
-      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
       
+      // Skip if we already processed this day
+      if (processedDays.has(day)) {
+        console.log(`Skipping duplicate day: ${day}`);
+        continue;
+      }
+      
+      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
       const dayAddOns = data.orderDetails.addOns[capitalizedDay];
+
       if (dayAddOns && dayAddOns.length > 0) {
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
@@ -51,6 +64,7 @@ exports.handler = async (event, context) => {
             'Extras': extrasString
           });
           updates.push({ day, extras: extrasString });
+          processedDays.add(day);
           console.log(`Updated ${day} with: ${extrasString}`);
         } catch (error) {
           console.error(`Failed to update ${day}:`, error);
@@ -64,6 +78,7 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         recordsFound: records.length,
+        uniqueDaysProcessed: processedDays.size,
         updates: updates
       })
     };
