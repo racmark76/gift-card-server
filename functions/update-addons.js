@@ -4,10 +4,10 @@ const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-function formatDate(dateStr) {
-  // Convert from "01/20/2025" to "1/20/2025"
+function formatToAirtableDate(dateStr) {
+  // Convert from "01/20/2025" or "1/20/2025" to "2025-01-20"
   const [month, day, year] = dateStr.split('/');
-  return `${parseInt(month)}/${day}/${year}`;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
 exports.handler = async (event, context) => {
@@ -25,41 +25,39 @@ exports.handler = async (event, context) => {
   try {
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
-    
-    // Create a map of formatted dates
-    const dateMap = data.orderDetails.orders.reduce((acc, order) => {
-      acc[formatDate(order.week)] = order.day;
-      return acc;
-    }, {});
 
-    console.log('Processing order for:', customerName);
-    console.log('Looking for dates:', Object.keys(dateMap));
+    // Get all the dates in the correct format
+    const orderDates = data.orderDetails.orders.map(order => ({
+      airtableDate: formatToAirtableDate(order.week),
+      day: order.day
+    }));
 
-    // Get records for this customer
+    console.log('Customer:', customerName);
+    console.log('Order dates:', orderDates);
+
+    // Create OR conditions for each date
+    const dateConditions = orderDates.map(order => 
+      `AND({Week} = '${order.airtableDate}', {Day} = '${order.day}')`
+    );
+
+    const formula = `AND({Customer Name} = '${customerName}', OR(${dateConditions.join(', ')}))`;
+    console.log('Using filter:', formula);
+
+    // Get matching records
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerName}'`
+      filterByFormula: formula
     }).all();
 
     console.log(`Found ${records.length} records`);
 
-    // Track processed dates to avoid duplicates
-    const processedCombos = new Set();
+    // Process updates
     const updates = [];
-
     for (const record of records) {
-      const week = record.get('Week');
       const day = record.get('Day');
-      const comboKey = `${week}-${day}`;
-      
-      // Skip if we already processed this date+day combination
-      if (processedCombos.has(comboKey)) {
-        console.log(`Skipping duplicate: ${comboKey}`);
-        continue;
-      }
-
+      const week = record.get('Week');
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      
       const dayAddOns = data.orderDetails.addOns[capitalizedDay];
-
       if (dayAddOns && dayAddOns.length > 0) {
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
@@ -70,7 +68,6 @@ exports.handler = async (event, context) => {
             'Extras': extrasString
           });
           updates.push({ day, week, extras: extrasString });
-          processedCombos.add(comboKey);
           console.log(`Updated ${day} (${week}) with: ${extrasString}`);
         } catch (error) {
           console.error(`Failed to update ${day} (${week}):`, error);
@@ -84,7 +81,6 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         recordsFound: records.length,
-        uniqueUpdates: processedCombos.size,
         updates: updates
       })
     };
@@ -101,6 +97,8 @@ exports.handler = async (event, context) => {
     };
   }
 };
+
+
 
 // const Airtable = require('airtable');
 
