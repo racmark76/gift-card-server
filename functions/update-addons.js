@@ -12,25 +12,34 @@ exports.handler = async (event, context) => {
     'Content-Type': 'application/json'
   };
 
-  // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers };
   }
 
   try {
+    if (!event.body) {
+      throw new Error('No body provided');
+    }
+
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
     
     console.log('1. Processing for customer:', customerName);
-    console.log('2. Available add-ons:', data.orderDetails.addOns);
 
-    // Get records for this customer
+    // First try to get all records
+    const allRecords = await base('tblM6K7Ii11HBkrW9').select({
+      maxRecords: 100
+    }).firstPage();
+
+    console.log('2. Total records in table:', allRecords.length);
+
+    // Then filter for our customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `{Customer Name} = '${customerName}'`
+      filterByFormula: `SEARCH('${customerName}', LOWER({Customer Name})) > 0`
     }).all();
 
     console.log(`3. Found ${records.length} records for ${customerName}`);
-    console.log('4. Records:', records.map(r => ({
+    console.log('4. Found records:', records.map(r => ({
       day: r.get('Day'),
       week: r.get('Week')
     })));
@@ -58,7 +67,7 @@ exports.handler = async (event, context) => {
             day,
             extras: extrasString
           });
-          console.log('7. Update successful');
+          console.log(`7. Update successful for ${day}`);
         } catch (error) {
           console.error(`Failed to update ${day}:`, error);
         }
@@ -84,7 +93,8 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message
+        error: error.message,
+        stack: error.stack
       })
     };
   }
