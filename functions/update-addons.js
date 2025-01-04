@@ -17,62 +17,65 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    if (!event.body) {
-      throw new Error('No body provided');
-    }
-
     const data = JSON.parse(event.body)[0];
     const customerName = data.customerInfo.name;
     
-    console.log('1. Processing for customer:', customerName);
-
-    // First try to get all records
-    const allRecords = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 100
-    }).firstPage();
-
-    console.log('2. Total records in table:', allRecords.length);
-
-    // Then filter for our customer
-    const records = await base('tblM6K7Ii11HBkrW9').select({
-      filterByFormula: `SEARCH('${customerName}', LOWER({Customer Name})) > 0`
-    }).all();
-
-    console.log(`3. Found ${records.length} records for ${customerName}`);
-    console.log('4. Found records:', records.map(r => ({
-      day: r.get('Day'),
-      week: r.get('Week')
+    console.log('1. Processing order for:', customerName);
+    console.log('2. Order contains days:', data.orderDetails.orders.map(o => ({
+      day: o.day,
+      week: o.week
     })));
 
     const updates = [];
-    for (const record of records) {
-      const day = record.get('Day');
+    
+    // Process each day from the order
+    for (const order of data.orderDetails.orders) {
+      const day = order.day;
       const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
       
-      console.log(`5. Processing ${day} (${capitalizedDay})`);
+      console.log(`\n3. Processing ${day} for ${customerName}`);
       
+      // Look for records matching this exact day and date
+      const records = await base('tblM6K7Ii11HBkrW9').select({
+        filterByFormula: `AND(
+          {Customer Name} = '${customerName}',
+          {Day} = '${day}',
+          {Week} = '${order.week}'
+        )`
+      }).all();
+
+      console.log(`4. Found ${records.length} records for ${day}`);
+      
+      // Get add-ons for this day
       const dayAddOns = data.orderDetails.addOns[capitalizedDay];
       if (dayAddOns && dayAddOns.length > 0) {
         const extrasString = dayAddOns.map(addon => 
           `${addon.name} (${addon.quantity})`
         ).join(', ');
 
-        console.log(`6. Updating ${day} with: ${extrasString}`);
-        
-        try {
-          const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
-            'Extras': extrasString
-          });
-          updates.push({
-            day,
-            extras: extrasString
-          });
-          console.log(`7. Update successful for ${day}`);
-        } catch (error) {
-          console.error(`Failed to update ${day}:`, error);
+        // Process each matching record
+        for (const record of records) {
+          try {
+            const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
+              'Extras': extrasString
+            });
+            console.log(`5. Updated ${day} with: ${extrasString}`);
+            updates.push({
+              day,
+              extras: extrasString,
+              success: true
+            });
+          } catch (error) {
+            console.error(`Failed to update ${day}:`, error);
+            updates.push({
+              day,
+              success: false,
+              error: error.message
+            });
+          }
         }
       } else {
-        console.log(`No add-ons found for ${capitalizedDay}`);
+        console.log(`No add-ons for ${day}`);
       }
     }
 
@@ -81,7 +84,6 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
-        recordsFound: records.length,
         updates: updates
       })
     };
@@ -93,13 +95,11 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message,
-        stack: error.stack
+        error: error.message
       })
     };
   }
 };
-
 
 // const Airtable = require('airtable');
 
