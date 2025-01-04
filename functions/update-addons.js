@@ -1,58 +1,104 @@
+const express = require('express');
+const router = express.Router();
 const Airtable = require('airtable');
 
 const base = new Airtable({
   apiKey: 'patySI8tdVaCy75dA.9e891746788af3b4420eb93e6cd76d866317dd4950b648196c88b0d9f0d51cf3'
 }).base('appYJ9gWRBFOLfb0r');
 
-exports.handler = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': 'https://bot.eitanerd.com',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
-  };
-
+router.post('/update-addons', async (req, res) => {
   try {
-    // First get recent records from Airtable
-    console.log('Getting recent records...');
+    // 1. Log the incoming request
+    console.log('1. Raw request body:', JSON.stringify(req.body, null, 2));
+    
+    const data = req.body[0];
+    const customerName = data.customerInfo.name;
+    
+    console.log('2. Processing for customer:', customerName);
+    console.log('3. Available add-ons:', JSON.stringify(data.orderDetails.addOns, null, 2));
+
+    // 4. Get ALL records first to see what's in Airtable
+    const allRecords = await base('tblM6K7Ii11HBkrW9').select({
+      maxRecords: 10
+    }).all();
+    
+    console.log('4. Sample records in Airtable:', allRecords.slice(0, 3).map(r => ({
+      customer: r.get('Customer Name'),
+      day: r.get('Day'),
+      week: r.get('Week')
+    })));
+
+    // 5. Now get records for this customer
     const records = await base('tblM6K7Ii11HBkrW9').select({
-      maxRecords: 10,
-      sort: [{field: 'Week', direction: 'desc'}]
+      filterByFormula: `{Customer Name} = '${customerName}'`
     }).all();
 
-    // Log what we found
-    console.log('Found records:');
-    records.forEach(record => {
-      console.log({
-        id: record.id,
-        customer: record.get('Customer Name'),
-        week: record.get('Week'),
-        day: record.get('Day'),
-        extras: record.get('Extras')
-      });
+    console.log(`5. Found ${records.length} records for ${customerName}:`, 
+      records.map(r => ({
+        id: r.id,
+        day: r.get('Day'),
+        week: r.get('Week')
+    })));
+
+    // 6. Process updates
+    const updates = [];
+    for (const record of records) {
+      const day = record.get('Day');
+      const capitalizedDay = day.charAt(0).toUpperCase() + day.slice(1);
+      
+      console.log(`6. Processing ${day} (${capitalizedDay})`);
+      console.log('7. Looking for add-ons in:', Object.keys(data.orderDetails.addOns));
+      
+      const dayAddOns = data.orderDetails.addOns[capitalizedDay];
+      if (dayAddOns && dayAddOns.length > 0) {
+        const extrasString = dayAddOns.map(addon => 
+          `${addon.name} (${addon.quantity})`
+        ).join(', ');
+
+        console.log(`8. Will update ${day} with: ${extrasString}`);
+        
+        try {
+          const updated = await base('tblM6K7Ii11HBkrW9').update(record.id, {
+            'Extras': extrasString
+          });
+          
+          console.log(`9. Update successful:`, {
+            id: updated.id,
+            extras: updated.get('Extras')
+          });
+          
+          updates.push({
+            day,
+            extras: extrasString
+          });
+        } catch (error) {
+          console.error(`Error updating ${day}:`, error);
+        }
+      } else {
+        console.log(`No add-ons found for ${capitalizedDay}`);
+      }
+    }
+
+    console.log('10. Final updates:', updates);
+
+    res.json({
+      success: true,
+      recordsFound: records.length,
+      updates: updates,
+      message: 'Process completed'
     });
 
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        records: records.map(record => ({
-          customer: record.get('Customer Name'),
-          week: record.get('Week'),
-          day: record.get('Day')
-        }))
-      })
-    };
-
   } catch (error) {
-    console.error('Error:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: error.message })
-    };
+    console.error('Main error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
   }
-};
+});
+
+module.exports = router;
 
 
 // const Airtable = require('airtable');
